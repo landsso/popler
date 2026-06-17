@@ -13,4 +13,4 @@ echo json_encode([
     'pdfimages'          => trim(shell_exec('which pdfimages')),
     'ghostscript'        => trim(shell_exec('which gs')),
     'imagemagick'        => trim(shell_exec('which magick')),
-], JSON_PRETTY_PRINT);
+], JSON_PRETTY_PRINT); 
