@@ -66,4 +66,4 @@ echo json_encode([
     'status' => true,
     'photo' => $photo ? $baseUrl . str_replace(__DIR__, '', $photo) : null,
     'signature' => $signature ? $baseUrl . str_replace(__DIR__, '', $signature) : null
-], JSON_PRETTY_PRINT);
+], JSON_PRETTY_PRINT); 
