@@ -3,7 +3,7 @@
 header('Content-Type: application/json');
 
 if (!isset($_FILES['pdf'])) {
-    die(json_encode([
+    exit(json_encode([
         'status' => false,
         'message' => 'PDF required'
     ]));
@@ -23,7 +23,7 @@ if (!is_dir($extractDir)) {
 $pdfFile = $uploadDir . uniqid('pdf_') . '.pdf';
 
 if (!move_uploaded_file($_FILES['pdf']['tmp_name'], $pdfFile)) {
-    die(json_encode([
+    exit(json_encode([
         'status' => false,
         'message' => 'Upload failed'
     ]));
@@ -41,7 +41,7 @@ exec(
 $images = glob($prefix . '*');
 
 if (!$images) {
-    die(json_encode([
+    exit(json_encode([
         'status' => false,
         'message' => 'No images extracted'
     ]));
@@ -50,97 +50,38 @@ if (!$images) {
 $photo = null;
 $signature = null;
 
-$largestArea = 0;
-
 foreach ($images as $img) {
 
-    $size = @getimagesize($img);
+    $name = basename($img);
 
-    if (!$size) {
-        continue;
-    }
-
-    $area = $size[0] * $size[1];
-
-    if ($area > $largestArea) {
-        $largestArea = $area;
+    if (strpos($name, '-000.') !== false) {
         $photo = $img;
     }
-}
 
-/*
-|--------------------------------------------------------------------------
-| Signature Detection
-|--------------------------------------------------------------------------
-*/
-
-$bestScore = 0;
-
-foreach ($images as $img) {
-
-    if ($img === $photo) {
-        continue;
-    }
-
-    $size = @getimagesize($img);
-
-    if (!$size) {
-        continue;
-    }
-
-    $w = $size[0];
-    $h = $size[1];
-
-    if ($w < 20 || $h < 10) {
-        continue;
-    }
-
-    try {
-
-        $im = new Imagick($img);
-
-        $hist = $im->getImageHistogram();
-
-        $visiblePixels = 0;
-
-        foreach ($hist as $pixel) {
-
-            $c = $pixel->getColor();
-
-            $brightness =
-                ($c['r'] + $c['g'] + $c['b']) / 3;
-
-            $count = $pixel->getColorCount();
-
-            if (
-                $brightness > 20 &&
-                $brightness < 235
-            ) {
-                $visiblePixels += $count;
-            }
-        }
-
-        if ($visiblePixels > $bestScore) {
-            $bestScore = $visiblePixels;
-            $signature = $img;
-        }
-
-    } catch (Exception $e) {
+    if (strpos($name, '-002.') !== false) {
+        $signature = $img;
     }
 }
 
-if (!$photo || !$signature) {
-
-    die(json_encode([
+if (!$photo) {
+    exit(json_encode([
         'status' => false,
-        'message' => 'Photo or Signature not found',
+        'message' => 'Photo not found',
+        'all_images' => array_map('basename', $images)
+    ]));
+}
+
+if (!$signature) {
+    exit(json_encode([
+        'status' => false,
+        'message' => 'Signature not found',
         'all_images' => array_map('basename', $images)
     ]));
 }
 
 /*
 |--------------------------------------------------------------------------
-| Auto Invert
+| Auto Invert Signature
 |--------------------------------------------------------------------------
 */
 
@@ -154,27 +95,27 @@ $invert = false;
 
 try {
 
-    $img = new Imagick($signature);
+    $im = new Imagick($signature);
 
-    $hist = $img->getImageHistogram();
+    $histogram = $im->getImageHistogram();
 
     $darkPixels = 0;
     $totalPixels = 0;
 
-    foreach ($hist as $pixel) {
+    foreach ($histogram as $pixel) {
 
-        $c = $pixel->getColor();
+        $color = $pixel->getColor();
 
         $brightness =
-            ($c['r'] +
-             $c['g'] +
-             $c['b']) / 3;
+            ($color['r'] +
+             $color['g'] +
+             $color['b']) / 3;
 
         $count = $pixel->getColorCount();
 
         $totalPixels += $count;
 
-        if ($brightness < 40) {
+        if ($brightness < 50) {
             $darkPixels += $count;
         }
     }
@@ -200,10 +141,7 @@ if ($invert) {
 
 } else {
 
-    copy(
-        $signature,
-        $fixedSignature
-    );
+    copy($signature, $fixedSignature);
 }
 
 $protocol =
@@ -220,7 +158,6 @@ $baseUrl =
 
 echo json_encode([
     'status' => true,
-
     'photo' =>
         $baseUrl .
         str_replace(__DIR__, '', $photo),
@@ -233,5 +170,4 @@ echo json_encode([
 
     'all_images' => array_map('basename', $images)
 
-],
-JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
