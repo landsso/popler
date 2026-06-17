@@ -185,5 +185,5 @@ echo json_encode([
     'photo' => $photoBase64,
     'signature' => $signatureBase64,
     'signature_inverted' => $invert,
-    'all_images' => $allImagesBase64
+   // 'all_images' => $allImagesBase64  // পরে প্রয়োজনে আনকমেন্ট করুন
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
