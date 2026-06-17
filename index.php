@@ -3,7 +3,7 @@
 header('Content-Type: application/json');
 
 if (!isset($_FILES['pdf'])) {
-    exit(json_encode([
+    die(json_encode([
         'status' => false,
         'message' => 'PDF required'
     ]));
@@ -20,11 +20,10 @@ if (!is_dir($extractDir)) {
     mkdir($extractDir, 0777, true);
 }
 
-$pdfName = uniqid('pdf_') . '.pdf';
-$pdfPath = $uploadDir . $pdfName;
+$pdfFile = $uploadDir . uniqid('pdf_') . '.pdf';
 
-if (!move_uploaded_file($_FILES['pdf']['tmp_name'], $pdfPath)) {
-    exit(json_encode([
+if (!move_uploaded_file($_FILES['pdf']['tmp_name'], $pdfFile)) {
+    die(json_encode([
         'status' => false,
         'message' => 'Upload failed'
     ]));
@@ -34,14 +33,14 @@ $prefix = $extractDir . uniqid('img_');
 
 exec(
     "pdfimages -all " .
-    escapeshellarg($pdfPath) . " " .
+    escapeshellarg($pdfFile) . " " .
     escapeshellarg($prefix)
 );
 
 $images = glob($prefix . '*');
 
 if (!$images) {
-    exit(json_encode([
+    die(json_encode([
         'status' => false,
         'message' => 'No images extracted'
     ]));
@@ -55,16 +54,13 @@ $smallestArea = PHP_INT_MAX;
 
 foreach ($images as $img) {
 
-    $info = @getimagesize($img);
+    $size = @getimagesize($img);
 
-    if (!$info) {
+    if (!$size) {
         continue;
     }
 
-    $width = $info[0];
-    $height = $info[1];
-
-    $area = $width * $height;
+    $area = $size[0] * $size[1];
 
     if ($area > $largestArea) {
         $largestArea = $area;
@@ -78,38 +74,100 @@ foreach ($images as $img) {
 }
 
 if (!$photo || !$signature) {
-    exit(json_encode([
+    die(json_encode([
         'status' => false,
-        'message' => 'Photo or signature not found'
+        'message' => 'Photo or Signature not found'
     ]));
 }
 
-$signatureExt = pathinfo($signature, PATHINFO_EXTENSION);
+/*
+|--------------------------------------------------------------------------
+| Signature Auto Detect & Invert
+|--------------------------------------------------------------------------
+*/
 
 $fixedSignature =
-    dirname($signature) .
-    '/signature_' .
+    $extractDir .
+    'signature_' .
     uniqid() .
     '.png';
 
-exec(
-    "magick " .
-    escapeshellarg($signature) .
-    " -negate -threshold 50% " .
-    escapeshellarg($fixedSignature)
-);
+$invert = false;
+
+try {
+
+    $img = new Imagick($signature);
+
+    $histogram = $img->getImageHistogram();
+
+    $darkPixels = 0;
+    $totalPixels = 0;
+
+    foreach ($histogram as $pixel) {
+
+        $color = $pixel->getColor();
+
+        $brightness =
+            ($color['r'] +
+             $color['g'] +
+             $color['b']) / 3;
+
+        $count = $pixel->getColorCount();
+
+        $totalPixels += $count;
+
+        if ($brightness < 50) {
+            $darkPixels += $count;
+        }
+    }
+
+    $darkPercent =
+        ($darkPixels / max($totalPixels, 1)) * 100;
+
+    if ($darkPercent > 70) {
+        $invert = true;
+    }
+
+} catch (Exception $e) {
+
+    copy($signature, $fixedSignature);
+}
+
+if ($invert) {
+
+    exec(
+        "magick "
+        . escapeshellarg($signature)
+        . " -negate "
+        . escapeshellarg($fixedSignature)
+    );
+
+} else {
+
+    copy($signature, $fixedSignature);
+}
+
+$protocol =
+    (!empty($_SERVER['HTTPS']) &&
+     $_SERVER['HTTPS'] !== 'off')
+    ? 'https://'
+    : 'http://';
 
 $baseUrl =
-    ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        ? 'https://'
-        : 'http://')
-    . $_SERVER['HTTP_HOST'];
+    $protocol .
+    $_SERVER['HTTP_HOST'];
 
-$photoUrl = str_replace(__DIR__, '', $photo);
-$signatureUrl = str_replace(__DIR__, '', $fixedSignature);
+$photoUrl =
+    $baseUrl .
+    str_replace(__DIR__, '', $photo);
+
+$signatureUrl =
+    $baseUrl .
+    str_replace(__DIR__, '', $fixedSignature);
 
 echo json_encode([
     'status' => true,
-    'photo' => $baseUrl . $photoUrl,
-    'signature' => $baseUrl . $signatureUrl
+    'photo' => $photoUrl,
+    'signature' => $signatureUrl,
+    'signature_inverted' => $invert
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
