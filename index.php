@@ -32,9 +32,10 @@ if (!move_uploaded_file($_FILES['pdf']['tmp_name'], $pdfFile)) {
 $prefix = $extractDir . uniqid('img_');
 
 exec(
-    "pdfimages -all " .
-    escapeshellarg($pdfFile) . " " .
-    escapeshellarg($prefix)
+    "pdfimages -all "
+    . escapeshellarg($pdfFile)
+    . " "
+    . escapeshellarg($prefix)
 );
 
 $images = glob($prefix . '*');
@@ -50,7 +51,6 @@ $photo = null;
 $signature = null;
 
 $largestArea = 0;
-$smallestArea = PHP_INT_MAX;
 
 foreach ($images as $img) {
 
@@ -66,23 +66,81 @@ foreach ($images as $img) {
         $largestArea = $area;
         $photo = $img;
     }
+}
 
-    if ($area < $smallestArea) {
-        $smallestArea = $area;
-        $signature = $img;
+/*
+|--------------------------------------------------------------------------
+| Signature Detection
+|--------------------------------------------------------------------------
+*/
+
+$bestScore = 0;
+
+foreach ($images as $img) {
+
+    if ($img === $photo) {
+        continue;
+    }
+
+    $size = @getimagesize($img);
+
+    if (!$size) {
+        continue;
+    }
+
+    $w = $size[0];
+    $h = $size[1];
+
+    if ($w < 20 || $h < 10) {
+        continue;
+    }
+
+    try {
+
+        $im = new Imagick($img);
+
+        $hist = $im->getImageHistogram();
+
+        $visiblePixels = 0;
+
+        foreach ($hist as $pixel) {
+
+            $c = $pixel->getColor();
+
+            $brightness =
+                ($c['r'] + $c['g'] + $c['b']) / 3;
+
+            $count = $pixel->getColorCount();
+
+            if (
+                $brightness > 20 &&
+                $brightness < 235
+            ) {
+                $visiblePixels += $count;
+            }
+        }
+
+        if ($visiblePixels > $bestScore) {
+            $bestScore = $visiblePixels;
+            $signature = $img;
+        }
+
+    } catch (Exception $e) {
     }
 }
 
 if (!$photo || !$signature) {
+
     die(json_encode([
         'status' => false,
-        'message' => 'Photo or Signature not found'
+        'message' => 'Photo or Signature not found',
+        'all_images' => array_map('basename', $images)
     ]));
 }
 
 /*
 |--------------------------------------------------------------------------
-| Signature Auto Detect & Invert
+| Auto Invert
 |--------------------------------------------------------------------------
 */
 
@@ -98,25 +156,25 @@ try {
 
     $img = new Imagick($signature);
 
-    $histogram = $img->getImageHistogram();
+    $hist = $img->getImageHistogram();
 
     $darkPixels = 0;
     $totalPixels = 0;
 
-    foreach ($histogram as $pixel) {
+    foreach ($hist as $pixel) {
 
-        $color = $pixel->getColor();
+        $c = $pixel->getColor();
 
         $brightness =
-            ($color['r'] +
-             $color['g'] +
-             $color['b']) / 3;
+            ($c['r'] +
+             $c['g'] +
+             $c['b']) / 3;
 
         $count = $pixel->getColorCount();
 
         $totalPixels += $count;
 
-        if ($brightness < 50) {
+        if ($brightness < 40) {
             $darkPixels += $count;
         }
     }
@@ -129,8 +187,6 @@ try {
     }
 
 } catch (Exception $e) {
-
-    copy($signature, $fixedSignature);
 }
 
 if ($invert) {
@@ -144,30 +200,38 @@ if ($invert) {
 
 } else {
 
-    copy($signature, $fixedSignature);
+    copy(
+        $signature,
+        $fixedSignature
+    );
 }
 
 $protocol =
-    (!empty($_SERVER['HTTPS']) &&
-     $_SERVER['HTTPS'] !== 'off')
-    ? 'https://'
-    : 'http://';
+(
+    !empty($_SERVER['HTTPS']) &&
+    $_SERVER['HTTPS'] !== 'off'
+)
+? 'https://'
+: 'http://';
 
 $baseUrl =
     $protocol .
     $_SERVER['HTTP_HOST'];
 
-$photoUrl =
-    $baseUrl .
-    str_replace(__DIR__, '', $photo);
-
-$signatureUrl =
-    $baseUrl .
-    str_replace(__DIR__, '', $fixedSignature);
-
 echo json_encode([
     'status' => true,
-    'photo' => $photoUrl,
-    'signature' => $signatureUrl,
-    'signature_inverted' => $invert
-], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+    'photo' =>
+        $baseUrl .
+        str_replace(__DIR__, '', $photo),
+
+    'signature' =>
+        $baseUrl .
+        str_replace(__DIR__, '', $fixedSignature),
+
+    'signature_inverted' => $invert,
+
+    'all_images' => array_map('basename', $images)
+
+],
+JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
