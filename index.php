@@ -9,8 +9,8 @@ if (!isset($_FILES['pdf'])) {
     ]));
 }
 
-$uploadDir = __DIR__ . '/uploads/';
-$extractDir = __DIR__ . '/extract/';
+$uploadDir = sys_get_temp_dir() . '/pdf_uploads/';
+$extractDir = sys_get_temp_dir() . '/pdf_extract/';
 
 if (!is_dir($uploadDir)) {
     mkdir($uploadDir, 0777, true);
@@ -41,29 +41,28 @@ exec(
 $images = glob($prefix . '*');
 
 if (!$images) {
+    // Cleanup
+    @unlink($pdfFile);
+    @rmdir($extractDir);
     exit(json_encode([
         'status' => false,
         'message' => 'No images extracted'
     ]));
 }
 
-$protocol =
-(
-    !empty($_SERVER['HTTPS']) &&
-    $_SERVER['HTTPS'] !== 'off'
-)
-? 'https://'
-: 'http://';
+// Helper function to convert image to base64
+function imageToBase64($filePath) {
+    $mime = mime_content_type($filePath);
+    $data = file_get_contents($filePath);
+    return 'data:' . $mime . ';base64,' . base64_encode($data);
+}
 
-$baseUrl = $protocol . $_SERVER['HTTP_HOST'];
-
-$allImageUrls = [];
+$allImagesBase64 = [];
 
 foreach ($images as $img) {
-
-    $allImageUrls[] = [
+    $allImagesBase64[] = [
         'file' => basename($img),
-        'url'  => $baseUrl . str_replace(__DIR__, '', $img)
+        'base64' => imageToBase64($img)
     ];
 }
 
@@ -77,15 +76,11 @@ $photo = null;
 $largestArea = 0;
 
 foreach ($images as $img) {
-
     $size = @getimagesize($img);
-
     if (!$size) {
         continue;
     }
-
     $area = $size[0] * $size[1];
-
     if ($area > $largestArea) {
         $largestArea = $area;
         $photo = $img;
@@ -102,11 +97,8 @@ $signature = null;
 
 /* First Priority = 002 */
 foreach ($images as $img) {
-
     $name = basename($img);
-
     if (strpos($name, '-002.') !== false) {
-
         $signature = $img;
         break;
     }
@@ -114,13 +106,9 @@ foreach ($images as $img) {
 
 /* Second Priority = 001 */
 if (!$signature) {
-
     foreach ($images as $img) {
-
         $name = basename($img);
-
         if (strpos($name, '-001.') !== false) {
-
             $signature = $img;
             break;
         }
@@ -133,47 +121,30 @@ if (!$signature) {
 |--------------------------------------------------------------------------
 */
 
-$signatureUrl = null;
+$signatureBase64 = null;
 $invert = false;
 
 if ($signature) {
 
-    $fixedSignature =
-        $extractDir .
-        'signature_' .
-        uniqid() .
-        '.png';
+    $fixedSignature = $extractDir . 'signature_' . uniqid() . '.png';
 
     try {
-
         $im = new Imagick($signature);
-
         $histogram = $im->getImageHistogram();
-
         $darkPixels = 0;
         $totalPixels = 0;
 
         foreach ($histogram as $pixel) {
-
             $color = $pixel->getColor();
-
-            $brightness =
-                ($color['r'] +
-                 $color['g'] +
-                 $color['b']) / 3;
-
+            $brightness = ($color['r'] + $color['g'] + $color['b']) / 3;
             $count = $pixel->getColorCount();
-
             $totalPixels += $count;
-
             if ($brightness < 50) {
                 $darkPixels += $count;
             }
         }
 
-        $darkPercent =
-            ($darkPixels / max($totalPixels, 1)) * 100;
-
+        $darkPercent = ($darkPixels / max($totalPixels, 1)) * 100;
         if ($darkPercent > 70) {
             $invert = true;
         }
@@ -182,41 +153,37 @@ if ($signature) {
     }
 
     if ($invert) {
-
         exec(
             "magick "
             . escapeshellarg($signature)
             . " -negate "
             . escapeshellarg($fixedSignature)
         );
-
     } else {
-
-        copy(
-            $signature,
-            $fixedSignature
-        );
+        copy($signature, $fixedSignature);
     }
 
-    $signatureUrl =
-        $baseUrl .
-        str_replace(__DIR__, '', $fixedSignature);
+    $signatureBase64 = imageToBase64($fixedSignature);
 }
 
-$photoUrl = null;
-
+$photoBase64 = null;
 if ($photo) {
-
-    $photoUrl =
-        $baseUrl .
-        str_replace(__DIR__, '', $photo);
+    $photoBase64 = imageToBase64($photo);
 }
+
+// Cleanup all temporary files
+@unlink($pdfFile);
+foreach ($images as $img) {
+    @unlink($img);
+}
+@unlink($fixedSignature);
+@rmdir($uploadDir);
+@rmdir($extractDir);
 
 echo json_encode([
     'status' => true,
-    'photo' => $photoUrl,
-    'signature' => $signatureUrl,
+    'photo' => $photoBase64,
+    'signature' => $signatureBase64,
     'signature_inverted' => $invert,
-    'all_images' => $allImageUrls
-],
-JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    'all_images' => $allImagesBase64
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
