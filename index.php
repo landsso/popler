@@ -3,7 +3,7 @@
 header('Content-Type: application/json');
 
 if (!isset($_FILES['pdf'])) {
-    die(json_encode([
+    exit(json_encode([
         'status' => false,
         'message' => 'PDF required'
     ]));
@@ -23,7 +23,7 @@ if (!is_dir($extractDir)) {
 $pdfFile = $uploadDir . uniqid('pdf_') . '.pdf';
 
 if (!move_uploaded_file($_FILES['pdf']['tmp_name'], $pdfFile)) {
-    die(json_encode([
+    exit(json_encode([
         'status' => false,
         'message' => 'Upload failed'
     ]));
@@ -32,16 +32,16 @@ if (!move_uploaded_file($_FILES['pdf']['tmp_name'], $pdfFile)) {
 $prefix = $extractDir . uniqid('img_');
 
 exec(
-    "pdfimages -all " .
-    escapeshellarg($pdfFile) .
-    " " .
-    escapeshellarg($prefix)
+    "pdfimages -all "
+    . escapeshellarg($pdfFile)
+    . " "
+    . escapeshellarg($prefix)
 );
 
 $images = glob($prefix . '*');
 
 if (!$images) {
-    die(json_encode([
+    exit(json_encode([
         'status' => false,
         'message' => 'No images extracted'
     ]));
@@ -100,18 +100,30 @@ foreach ($images as $img) {
 
 $signature = null;
 
+/* First Priority = 002 */
 foreach ($images as $img) {
 
     $name = basename($img);
 
-    if (
-        strpos($name, '-002.') !== false ||
-        strpos($name, '-001.') !== false
-    ) {
+    if (strpos($name, '-002.') !== false) {
 
         $signature = $img;
-
         break;
+    }
+}
+
+/* Second Priority = 001 */
+if (!$signature) {
+
+    foreach ($images as $img) {
+
+        $name = basename($img);
+
+        if (strpos($name, '-001.') !== false) {
+
+            $signature = $img;
+            break;
+        }
     }
 }
 
@@ -172,10 +184,10 @@ if ($signature) {
     if ($invert) {
 
         exec(
-            "magick " .
-            escapeshellarg($signature) .
-            " -negate " .
-            escapeshellarg($fixedSignature)
+            "magick "
+            . escapeshellarg($signature)
+            . " -negate "
+            . escapeshellarg($fixedSignature)
         );
 
     } else {
